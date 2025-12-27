@@ -5,6 +5,7 @@ from typing import Optional
 from .data.yahoo import YahooFinanceClient
 from .data.news import NewsClient, MockNewsClient
 from .data.fmp import FMPClient, MockFMPClient
+from .data.alphavantage import AlphaVantageClient, MockAlphaVantageClient
 from .analysis.technical import TechnicalAnalyzer
 from .analysis.fundamental import FundamentalAnalyzer
 from .analysis.sentiment import SentimentAnalyzer
@@ -27,6 +28,7 @@ class StockAnalyzer:
         news_api_key: Optional[str] = None,
         fmp_api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,
+        alphavantage_api_key: Optional[str] = None,
         sentiment_weight: float = 0.25,
         technical_weight: float = 0.40,
         fundamental_weight: float = 0.35
@@ -37,6 +39,7 @@ class StockAnalyzer:
             news_api_key: NewsAPI.org API key (optional, enables sentiment analysis)
             fmp_api_key: Financial Modeling Prep API key (optional, enhances fundamentals)
             openai_api_key: OpenAI API key (optional, enables AI-powered transcript summaries)
+            alphavantage_api_key: Alpha Vantage API key (optional, provides news sentiment)
             sentiment_weight: Weight for sentiment in recommendations (0-1)
             technical_weight: Weight for technical analysis (0-1)
             fundamental_weight: Weight for fundamental analysis (0-1)
@@ -54,6 +57,12 @@ class StockAnalyzer:
             self.fmp_client = FMPClient(api_key=fmp_api_key)
         else:
             self.fmp_client = MockFMPClient()
+
+        # Alpha Vantage client
+        if alphavantage_api_key:
+            self.alphavantage_client = AlphaVantageClient(api_key=alphavantage_api_key)
+        else:
+            self.alphavantage_client = MockAlphaVantageClient()
 
         self.technical_analyzer = TechnicalAnalyzer()
         self.fundamental_analyzer = FundamentalAnalyzer()
@@ -145,6 +154,103 @@ class StockAnalyzer:
             pass
 
         return fmp_data
+
+    def _fetch_alphavantage_data(self, ticker: str) -> dict:
+        """Fetch data from Alpha Vantage
+
+        Args:
+            ticker: Stock ticker symbol
+
+        Returns:
+            Dict with Alpha Vantage data (news_sentiment, company_overview, earnings)
+        """
+        if not self.alphavantage_client.is_configured():
+            return {}
+
+        av_data = {}
+
+        try:
+            # News sentiment with pre-computed scores
+            sentiment_data = self.alphavantage_client.get_news_sentiment(ticker, limit=20)
+            if sentiment_data and "feed" in sentiment_data:
+                articles = []
+                for item in sentiment_data["feed"][:10]:
+                    # Find sentiment for this specific ticker
+                    ticker_sentiment = None
+                    for ts in item.get("ticker_sentiment", []):
+                        if ts.get("ticker") == ticker:
+                            ticker_sentiment = ts
+                            break
+
+                    articles.append({
+                        "title": item.get("title"),
+                        "summary": item.get("summary"),
+                        "source": item.get("source"),
+                        "url": item.get("url"),
+                        "published_at": item.get("time_published"),
+                        "overall_sentiment_score": float(item.get("overall_sentiment_score", 0)),
+                        "overall_sentiment_label": item.get("overall_sentiment_label"),
+                        "ticker_relevance": float(ticker_sentiment.get("relevance_score", 0)) if ticker_sentiment else 0,
+                        "ticker_sentiment_score": float(ticker_sentiment.get("ticker_sentiment_score", 0)) if ticker_sentiment else 0,
+                    })
+                av_data["news_sentiment"] = articles
+
+                # Calculate aggregate sentiment from Alpha Vantage scores
+                if articles:
+                    avg_sentiment = sum(a["ticker_sentiment_score"] for a in articles) / len(articles)
+                    av_data["aggregate_sentiment"] = {
+                        "score": avg_sentiment,
+                        "label": "Bullish" if avg_sentiment > 0.1 else ("Bearish" if avg_sentiment < -0.1 else "Neutral"),
+                        "articles_analyzed": len(articles)
+                    }
+        except Exception:
+            pass
+
+        try:
+            # Company overview for additional fundamentals
+            overview = self.alphavantage_client.get_company_overview(ticker)
+            if overview:
+                av_data["company_overview"] = {
+                    "description": overview.get("Description"),
+                    "sector": overview.get("Sector"),
+                    "industry": overview.get("Industry"),
+                    "market_cap": overview.get("MarketCapitalization"),
+                    "pe_ratio": overview.get("PERatio"),
+                    "peg_ratio": overview.get("PEGRatio"),
+                    "book_value": overview.get("BookValue"),
+                    "dividend_yield": overview.get("DividendYield"),
+                    "eps": overview.get("EPS"),
+                    "revenue_ttm": overview.get("RevenueTTM"),
+                    "profit_margin": overview.get("ProfitMargin"),
+                    "52_week_high": overview.get("52WeekHigh"),
+                    "52_week_low": overview.get("52WeekLow"),
+                    "analyst_target_price": overview.get("AnalystTargetPrice"),
+                    "analyst_rating": overview.get("AnalystRatingStrongBuy"),
+                }
+        except Exception:
+            pass
+
+        try:
+            # Earnings data
+            earnings = self.alphavantage_client.get_earnings(ticker)
+            if earnings:
+                quarterly = earnings.get("quarterlyEarnings", [])[:4]
+                av_data["earnings"] = {
+                    "quarterly": [
+                        {
+                            "date": e.get("fiscalDateEnding"),
+                            "reported_eps": e.get("reportedEPS"),
+                            "estimated_eps": e.get("estimatedEPS"),
+                            "surprise": e.get("surprise"),
+                            "surprise_pct": e.get("surprisePercentage"),
+                        }
+                        for e in quarterly
+                    ]
+                }
+        except Exception:
+            pass
+
+        return av_data
 
     def _fetch_transcript_analysis(self, ticker: str, company_name: str) -> Optional[dict]:
         """Fetch and analyze earnings transcript
@@ -353,6 +459,9 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
         if include_fmp:
             fmp_data = self._fetch_fmp_data(ticker)
 
+        # Fetch Alpha Vantage data
+        av_data = self._fetch_alphavantage_data(ticker)
+
         # Perform technical analysis
         technical_analysis = None
         if len(history) > 0:
@@ -370,13 +479,25 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
         news_articles = []
 
         if include_news:
-            # Try NewsAPI first, fall back to FMP news
+            # Try NewsAPI first, fall back to Alpha Vantage, then FMP news
             if self.news_client.is_configured():
                 news_articles = self.news_client.fetch_stock_news(
                     ticker,
                     company_name=company_name,
                     days=news_days
                 )
+            elif av_data.get("news_sentiment"):
+                # Use Alpha Vantage news (already has sentiment scores)
+                news_articles = [
+                    {
+                        "title": article.get("title"),
+                        "description": article.get("summary"),
+                        "source": article.get("source"),
+                        "url": article.get("url"),
+                        "published_at": article.get("published_at"),
+                    }
+                    for article in av_data["news_sentiment"]
+                ]
             elif fmp_data.get("news"):
                 # Use FMP news as fallback
                 news_articles = [
@@ -392,6 +513,15 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
 
             if news_articles:
                 sentiment_analysis = self.sentiment_analyzer.analyze(news_articles)
+
+            # Enhance sentiment with Alpha Vantage pre-computed scores if available
+            if av_data.get("aggregate_sentiment") and sentiment_analysis:
+                av_sentiment = av_data["aggregate_sentiment"]
+                # Blend our sentiment with Alpha Vantage (AV is pre-computed ML-based)
+                av_score_normalized = av_sentiment["score"] * 100  # Convert -1 to 1 range to -100 to 100
+                blended_score = (sentiment_analysis.get("score", 0) + av_score_normalized) / 2
+                sentiment_analysis["score"] = int(blended_score)
+                sentiment_analysis["alphavantage_sentiment"] = av_sentiment
 
         # Fetch and analyze earnings transcript
         transcript_analysis = None
@@ -428,6 +558,13 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
                 "fmp_recommendation": fmp_data.get("rating", {}).get("ratingRecommendation"),
                 "analyst_target": fmp_data.get("price_target", {}).get("targetConsensus"),
                 "peers": fmp_data.get("peers", []),
+            }
+
+        # Add Alpha Vantage data to report
+        if av_data:
+            report["alphavantage_data"] = {
+                "earnings": av_data.get("earnings"),
+                "sentiment": av_data.get("aggregate_sentiment"),
             }
 
         # Generate AI investment narrative (2-5 year horizon)

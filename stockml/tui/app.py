@@ -220,6 +220,7 @@ class StockMLApp(App):
                 news_api_key=os.environ.get("NEWS_API_KEY"),
                 fmp_api_key=os.environ.get("FMP_API_KEY"),
                 openai_api_key=os.environ.get("OPENAI_API_KEY"),
+                alphavantage_api_key=os.environ.get("ALPHAVANTAGE_API_KEY"),
             )
 
         try:

@@ -41,6 +41,9 @@ NEWS_API_KEY=your_newsapi_key_here
 
 # Optional - enables AI-powered investment narrative
 OPENAI_API_KEY=your_openai_key_here
+
+# Optional - news sentiment with ML scores, earnings data, fundamentals
+ALPHAVANTAGE_API_KEY=your_alphavantage_key_here
 ```
 
 ### Where to Get API Keys
@@ -48,6 +51,7 @@ OPENAI_API_KEY=your_openai_key_here
 | API | Purpose | Get Key |
 |-----|---------|---------|
 | **Financial Modeling Prep (FMP)** | Fundamentals, DCF, analyst ratings, peers, transcripts | [financialmodelingprep.com](https://site.financialmodelingprep.com/developer/docs) - Free tier: 250 requests/day |
+| **Alpha Vantage** | News sentiment (ML-scored), earnings surprises, fundamentals | [alphavantage.co](https://www.alphavantage.co/support/#api-key) - Free tier: 25 requests/day |
 | **NewsAPI** | News article fetching for sentiment | [newsapi.org](https://newsapi.org/register) - Free tier: 100 requests/day |
 | **OpenAI** | AI-powered investment narrative | [platform.openai.com](https://platform.openai.com/api-keys) - Pay per use |
 
@@ -91,7 +95,8 @@ from stockml import StockAnalyzer
 analyzer = StockAnalyzer(
     fmp_api_key="your_key",
     news_api_key="your_key",
-    openai_api_key="your_key"
+    openai_api_key="your_key",
+    alphavantage_api_key="your_key"
 )
 
 # Full analysis
@@ -118,6 +123,7 @@ stockml/
 │   ├── data/
 │   │   ├── yahoo.py          # Yahoo Finance client
 │   │   ├── fmp.py            # Financial Modeling Prep client
+│   │   ├── alphavantage.py   # Alpha Vantage client
 │   │   └── news.py           # NewsAPI client
 │   ├── tui/
 │   │   ├── app.py            # Main TUI application
