@@ -17,7 +17,7 @@ A comprehensive stock analysis framework combining technical, fundamental, and s
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/stockml.git
+git clone https://github.com/ajokela/stockml.git
 cd stockml
 
 # Create virtual environment with uv
