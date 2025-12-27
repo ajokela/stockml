@@ -1,0 +1,225 @@
+/* StockML TUI Styles */
+
+/* Main app layout */
+Screen {
+    background: $surface;
+}
+
+#app-header {
+    dock: top;
+    height: 3;
+    background: $primary;
+    color: $text;
+    padding: 1 2;
+}
+
+#app-header .title {
+    text-style: bold;
+}
+
+#app-footer {
+    dock: bottom;
+    height: 1;
+    background: $primary-darken-2;
+    color: $text-muted;
+    padding: 0 2;
+}
+
+/* Stock header */
+#stock-header {
+    height: 3;
+    padding: 1 2;
+    background: $surface-darken-1;
+}
+
+#stock-header .ticker {
+    text-style: bold;
+    color: $primary-lighten-2;
+}
+
+#stock-header .price {
+    dock: right;
+    text-style: bold;
+}
+
+/* Tab content */
+#main-content {
+    height: 1fr;
+    padding: 1;
+}
+
+TabbedContent {
+    height: 100%;
+}
+
+TabPane {
+    padding: 1;
+}
+
+/* Overview tab layout */
+#overview-top {
+    height: auto;
+    layout: horizontal;
+}
+
+#recommendation-container {
+    width: 1fr;
+    height: auto;
+    margin-right: 1;
+}
+
+#price-targets-container {
+    width: 1fr;
+    height: auto;
+}
+
+#company-summary-container {
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+#scores-container {
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+#reasoning-container {
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+#narrative-container {
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+#peers-container {
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+#peers-table {
+    height: auto;
+    max-height: 10;
+}
+
+/* Technical tab */
+#technical-indicators {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#technical-signals {
+    height: 1fr;
+}
+
+/* Data tables */
+DataTable {
+    height: auto;
+    max-height: 20;
+}
+
+DataTable > .datatable--header {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+/* News list */
+#news-list {
+    height: 1fr;
+}
+
+#news-list > ListItem {
+    height: auto;
+    padding: 1;
+    margin-bottom: 1;
+    border: solid $primary-darken-2;
+}
+
+#news-list > ListItem:hover {
+    background: $primary 10%;
+}
+
+.news-item {
+    height: auto;
+    padding: 1;
+    margin-bottom: 1;
+    border: solid $primary;
+}
+
+.news-item:hover {
+    background: $primary 10%;
+}
+
+.news-title {
+    text-style: bold;
+}
+
+.news-meta {
+    color: $text-muted;
+}
+
+/* Sentiment colors */
+.bullish, .positive {
+    color: $success;
+}
+
+.bearish, .negative {
+    color: $error;
+}
+
+.neutral {
+    color: $text-muted;
+}
+
+/* Loading indicator */
+#loading {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+}
+
+LoadingIndicator {
+    width: auto;
+    height: auto;
+}
+
+/* Input dialog */
+#add-stock-dialog {
+    width: 50;
+    height: auto;
+    padding: 1 2;
+    border: solid $primary;
+    background: $surface;
+}
+
+#add-stock-dialog Input {
+    margin: 1 0;
+}
+
+/* Comparison mode */
+#comparison-table {
+    height: 1fr;
+}
+
+/* Stock selector buttons */
+.stock-button {
+    min-width: 10;
+    margin: 0 1;
+}
+
+.stock-button.selected {
+    background: $primary;
+    color: $text;
+}
