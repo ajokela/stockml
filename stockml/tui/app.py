@@ -22,8 +22,10 @@ from textual.widgets import (
     ListView,
     ListItem,
     Markdown,
+    ProgressBar,
 )
 from textual.screen import ModalScreen
+from textual.reactive import reactive
 
 from .widgets.recommendation import RecommendationWidget
 from .widgets.score_bar import ScoreBar
@@ -60,6 +62,69 @@ class AddStockModal(ModalScreen):
             self.dismiss(ticker)
 
 
+class AnalysisProgressModal(ModalScreen):
+    """Modal showing analysis progress"""
+
+    ticker_symbol = reactive("")
+    current_stage = reactive(0)
+    status_message = reactive("Initializing...")
+
+    STAGES = [
+        ("Fetching stock data from Yahoo Finance...", 10),
+        ("Fetching FMP data...", 25),
+        ("Fetching Alpha Vantage data...", 40),
+        ("Running technical analysis...", 50),
+        ("Running fundamental analysis...", 60),
+        ("Fetching news and sentiment...", 75),
+        ("Analyzing earnings transcripts...", 85),
+        ("Generating AI narrative...", 95),
+        ("Finalizing report...", 100),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Container(id="progress-dialog"):
+            yield Label("Analyzing Stock", id="progress-title")
+            yield Static("", id="progress-ticker")
+            yield ProgressBar(total=100, show_eta=False, id="progress-bar")
+            yield Static("Initializing...", id="progress-status")
+
+    def on_mount(self) -> None:
+        """Initialize display when mounted"""
+        if self.ticker_symbol:
+            self.query_one("#progress-ticker", Static).update(f"[bold]{self.ticker_symbol}[/bold]")
+
+    def watch_ticker_symbol(self, ticker: str) -> None:
+        """React to ticker changes"""
+        try:
+            self.query_one("#progress-ticker", Static).update(f"[bold]{ticker}[/bold]")
+        except Exception:
+            pass  # Widget not mounted yet
+
+    def set_ticker(self, ticker: str) -> None:
+        """Set the ticker being analyzed"""
+        self.ticker_symbol = ticker
+
+    def update_progress(self, stage: int, message: str = None) -> None:
+        """Update progress bar and status message"""
+        if stage < len(self.STAGES):
+            status_msg, progress_val = self.STAGES[stage]
+            if message:
+                status_msg = message
+            try:
+                self.query_one("#progress-bar", ProgressBar).update(progress=progress_val)
+                self.query_one("#progress-status", Static).update(status_msg)
+            except Exception:
+                pass  # Widgets not mounted yet
+
+    def set_complete(self) -> None:
+        """Mark analysis as complete"""
+        try:
+            self.query_one("#progress-bar", ProgressBar).update(progress=100)
+            self.query_one("#progress-status", Static).update("Complete!")
+        except Exception:
+            pass
+
+
 class StockMLApp(App):
     """StockML Terminal User Interface"""
 
@@ -68,6 +133,7 @@ class StockMLApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
+        Binding("R", "force_refresh", "Force Refresh", show=False),
         Binding("a", "add_stock", "Add Stock"),
         Binding("c", "toggle_compare", "Compare"),
         Binding("1", "tab_1", "Overview", show=False),
@@ -91,6 +157,8 @@ class StockMLApp(App):
         self.stocks: list = []  # For comparison mode
         self.compare_mode = False
         self.news_urls: list = []  # Store URLs for news items
+        self.progress_modal: Optional[AnalysisProgressModal] = None
+        self._force_refresh: bool = False  # Bypass cache on next load
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -195,24 +263,37 @@ class StockMLApp(App):
 
     async def on_mount(self) -> None:
         """Load data when app starts"""
+        # Update header to show ready state
+        stock_info = self.query_one("#stock-info", Static)
         if self.ticker:
+            stock_info.update(f"Loading {self.ticker}...")
             await self.load_stock(self.ticker)
+        else:
+            stock_info.update("Press 'a' to add a stock")
 
     async def load_stock(self, ticker: str) -> None:
         """Load and analyze a stock"""
         self.ticker = ticker.upper()
 
-        # Update header
-        stock_info = self.query_one("#stock-info", Static)
-        stock_info.update(f"Loading {self.ticker}...")
+        # Show progress modal
+        self.progress_modal = AnalysisProgressModal()
+        self.push_screen(self.progress_modal)
+        self.progress_modal.set_ticker(self.ticker)
 
         # Run analysis in background thread (blocking I/O)
         self.run_worker(lambda: self._analyze_stock(ticker), exclusive=True, thread=True)
+
+    def _update_progress(self, stage: int, message: str = None) -> None:
+        """Update progress modal from worker thread"""
+        if self.progress_modal:
+            self.call_from_thread(self.progress_modal.update_progress, stage, message)
 
     def _analyze_stock(self, ticker: str) -> None:
         """Perform stock analysis (runs in worker thread)"""
         from dotenv import load_dotenv
         load_dotenv()
+
+        self._update_progress(0)  # Initializing
 
         if self.analyzer is None:
             from stockml import StockAnalyzer
@@ -224,18 +305,37 @@ class StockMLApp(App):
             )
 
         try:
-            self.report = self.analyzer.analyze(ticker)
+            # Run analysis with progress callback
+            # Use force_refresh flag and then reset it
+            force_refresh = self._force_refresh
+            self._force_refresh = False
+
+            self.report = self.analyzer.analyze(
+                ticker,
+                progress_callback=self._update_progress,
+                force_refresh=force_refresh
+            )
             self.call_from_thread(self._update_display)
         except Exception as e:
             self.call_from_thread(self._show_error, str(e))
 
     def _show_error(self, message: str) -> None:
         """Show error message"""
+        # Dismiss progress modal if open
+        if self.progress_modal:
+            self.pop_screen()
+            self.progress_modal = None
+
         stock_info = self.query_one("#stock-info", Static)
         stock_info.update(f"[red]Error: {message}[/red]")
 
     def _update_display(self) -> None:
         """Update all display components with report data"""
+        # Dismiss progress modal if open
+        if self.progress_modal:
+            self.pop_screen()
+            self.progress_modal = None
+
         if not self.report:
             return
 
@@ -248,8 +348,20 @@ class StockMLApp(App):
         stock_info = self.query_one("#stock-info", Static)
         stock_info.update(f"[bold]{ticker}[/bold] - {company_name}")
 
+        # Show cache status in price area
         stock_price = self.query_one("#stock-price", Static)
-        stock_price.update(f"[bold]${price:.2f}[/bold]")
+        cache_info = self.report.get("_cache_info", {})
+        if cache_info.get("from_cache"):
+            cache_age = cache_info.get("cache_age_hours", 0)
+            if cache_age < 1:
+                age_str = f"{int(cache_age * 60)}m"
+            elif cache_age < 24:
+                age_str = f"{cache_age:.1f}h"
+            else:
+                age_str = f"{cache_age / 24:.1f}d"
+            stock_price.update(f"[bold]${price:.2f}[/bold] [dim](cached {age_str} ago)[/dim]")
+        else:
+            stock_price.update(f"[bold]${price:.2f}[/bold]")
 
         self._update_overview()
         self._update_technical()
@@ -610,24 +722,32 @@ class StockMLApp(App):
 
     # Actions
     async def action_refresh(self) -> None:
-        """Refresh current stock"""
+        """Refresh current stock (uses cache if available)"""
         if self.ticker:
+            await self.load_stock(self.ticker)
+
+    async def action_force_refresh(self) -> None:
+        """Force refresh current stock (bypasses cache)"""
+        if self.ticker:
+            self._force_refresh = True
+            self.notify("Force refreshing (bypassing cache)...")
             await self.load_stock(self.ticker)
 
     def action_add_stock(self) -> None:
         """Show add stock dialog"""
         def handle_result(result: str | None) -> None:
             if result:
-                # Schedule the async load_stock call
-                self.call_later(lambda: self.run_worker(
+                self.ticker = result.upper()
+                # Show progress modal
+                self.progress_modal = AnalysisProgressModal()
+                self.push_screen(self.progress_modal)
+                self.progress_modal.set_ticker(self.ticker)
+                # Run analysis in background thread
+                self.run_worker(
                     lambda: self._analyze_stock(result),
                     exclusive=True,
                     thread=True
-                ))
-                # Update header immediately
-                self.ticker = result.upper()
-                stock_info = self.query_one("#stock-info", Static)
-                stock_info.update(f"Loading {self.ticker}...")
+                )
 
         self.push_screen(AddStockModal(), handle_result)
 

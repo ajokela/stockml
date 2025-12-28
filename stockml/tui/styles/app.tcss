@@ -223,3 +223,38 @@ LoadingIndicator {
     background: $primary;
     color: $text;
 }
+
+/* Progress dialog */
+AnalysisProgressModal {
+    align: center middle;
+}
+
+#progress-dialog {
+    width: 60;
+    height: auto;
+    padding: 2 3;
+    border: thick $primary;
+    background: $surface;
+}
+
+#progress-title {
+    text-align: center;
+    text-style: bold;
+    color: $primary-lighten-2;
+    margin-bottom: 1;
+}
+
+#progress-ticker {
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#progress-bar {
+    margin: 1 0;
+}
+
+#progress-status {
+    text-align: center;
+    color: $text-muted;
+    margin-top: 1;
+}

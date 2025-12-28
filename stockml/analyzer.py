@@ -1,6 +1,7 @@
 """Main StockAnalyzer class - public API"""
 
-from typing import Optional
+from typing import Optional, Callable
+import sys
 
 from .data.yahoo import YahooFinanceClient
 from .data.news import NewsClient, MockNewsClient
@@ -12,6 +13,7 @@ from .analysis.sentiment import SentimentAnalyzer
 from .analysis.transcript import TranscriptAnalyzer
 from .recommendation import RecommendationEngine, Action
 from .report import ReportGenerator
+from .cache import ReportCache
 
 
 class StockAnalyzer:
@@ -31,7 +33,9 @@ class StockAnalyzer:
         alphavantage_api_key: Optional[str] = None,
         sentiment_weight: float = 0.25,
         technical_weight: float = 0.40,
-        fundamental_weight: float = 0.35
+        fundamental_weight: float = 0.35,
+        cache_enabled: bool = True,
+        cache_max_age_days: int = 7
     ):
         """Initialize StockAnalyzer
 
@@ -43,6 +47,8 @@ class StockAnalyzer:
             sentiment_weight: Weight for sentiment in recommendations (0-1)
             technical_weight: Weight for technical analysis (0-1)
             fundamental_weight: Weight for fundamental analysis (0-1)
+            cache_enabled: Whether to enable report caching (default True)
+            cache_max_age_days: Maximum age of cached reports in days (default 7)
         """
         self.yahoo_client = YahooFinanceClient()
 
@@ -79,6 +85,10 @@ class StockAnalyzer:
         )
 
         self.report_generator = ReportGenerator()
+
+        # Cache
+        self.cache_enabled = cache_enabled
+        self.cache = ReportCache(max_age_days=cache_max_age_days) if cache_enabled else None
 
     def _fetch_fmp_data(self, ticker: str) -> dict:
         """Fetch enhanced data from Financial Modeling Prep
@@ -419,7 +429,6 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            import sys
             print(f"Narrative generation error: {e}", file=sys.stderr)
             return None
 
@@ -430,7 +439,9 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
         news_days: int = 7,
         include_news: bool = True,
         include_fmp: bool = True,
-        include_transcripts: bool = True
+        include_transcripts: bool = True,
+        progress_callback: Callable[[int, Optional[str]], None] = None,
+        force_refresh: bool = False
     ) -> dict:
         """Perform full analysis on a stock
 
@@ -441,40 +452,61 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
             include_news: Whether to fetch and analyze news
             include_fmp: Whether to fetch FMP enhanced data
             include_transcripts: Whether to fetch and analyze earnings transcripts
+            progress_callback: Optional callback function(stage: int, message: str) for progress updates
+            force_refresh: If True, bypass cache and fetch fresh data
 
         Returns:
             JSON-serializable report dict with recommendation
         """
+        def report_progress(stage: int, message: str = None):
+            if progress_callback:
+                progress_callback(stage, message)
+
         ticker = ticker.upper()
 
-        # Fetch data from Yahoo Finance
+        # Check cache first (unless force_refresh is True)
+        if self.cache and not force_refresh:
+            cached_report = self.cache.get(ticker, period)
+            if cached_report:
+                # Report cache hit via progress callback
+                report_progress(0, "Loading from cache...")
+                report_progress(8, "Loaded from cache")
+                return cached_report
+
+        # Stage 0: Fetch data from Yahoo Finance
+        report_progress(0)
         info = self.yahoo_client.get_stock_info(ticker)
         history = self.yahoo_client.get_price_history(ticker, period=period)
         dividends = self.yahoo_client.get_dividends(ticker)
         current_price = self.yahoo_client.get_current_price(ticker)
         company_name = info.get("shortName") or info.get("longName") or ticker
 
-        # Fetch FMP enhanced data
+        # Stage 1: Fetch FMP enhanced data
+        report_progress(1)
         fmp_data = {}
         if include_fmp:
             fmp_data = self._fetch_fmp_data(ticker)
 
-        # Fetch Alpha Vantage data
+        # Stage 2: Fetch Alpha Vantage data
+        report_progress(2)
         av_data = self._fetch_alphavantage_data(ticker)
 
-        # Perform technical analysis
+        # Stage 3: Perform technical analysis
+        report_progress(3)
         technical_analysis = None
         if len(history) > 0:
             technical_analysis = self.technical_analyzer.analyze(history)
 
-        # Perform fundamental analysis (now with FMP data)
+        # Stage 4: Perform fundamental analysis (now with FMP data)
+        report_progress(4)
         fundamental_analysis = self.fundamental_analyzer.analyze(
             info,
             dividends,
             fmp_data=fmp_data if fmp_data else None
         )
 
-        # Fetch news and perform sentiment analysis
+        # Stage 5: Fetch news and sentiment
+        report_progress(5)
         sentiment_analysis = None
         news_articles = []
 
@@ -523,7 +555,8 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
                 sentiment_analysis["score"] = int(blended_score)
                 sentiment_analysis["alphavantage_sentiment"] = av_sentiment
 
-        # Fetch and analyze earnings transcript
+        # Stage 6: Analyze earnings transcripts
+        report_progress(6)
         transcript_analysis = None
         if include_transcripts:
             transcript_analysis = self._fetch_transcript_analysis(ticker, company_name)
@@ -567,7 +600,8 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
                 "sentiment": av_data.get("aggregate_sentiment"),
             }
 
-        # Generate AI investment narrative (2-5 year horizon)
+        # Stage 7: Generate AI narrative
+        report_progress(7)
         company_info = fundamental_analysis.get("company", {}) if fundamental_analysis else {}
         narrative = self._generate_narrative(
             ticker=ticker,
@@ -581,6 +615,13 @@ Keep the tone professional and analytical. Do not use bullet points - write in f
         )
         if narrative:
             report["investment_narrative"] = narrative
+
+        # Stage 8: Finalize report
+        report_progress(8)
+
+        # Store in cache
+        if self.cache:
+            self.cache.set(ticker, report, period)
 
         return report
 
